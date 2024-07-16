@@ -1,0 +1,10 @@
+displayName: Request signature verifier
+summary: Makes sure that a request contains valid signature
+type: middleware
+import: github.com/sysradium/traefik-request-signature-verifier
+testData:
+  headers:
+    - X-Date
+    - Authorization
+    - APP-ID
+  secretKey: "test"
