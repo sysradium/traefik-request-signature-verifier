@@ -12,7 +12,8 @@ import (
 )
 
 var (
-	ErrInvalidDate         = errors.New("invalid date")
+	ErrSignatureExpired    = errors.New("signature has expired")
+	ErrDateInvalidFormat   = errors.New("invalid date format")
 	ErrInvalidSignature    = errors.New("invalid signature")
 	ErrSignatureNotPresent = errors.New("signature not present")
 )
@@ -25,13 +26,16 @@ type RequestVerifier struct {
 }
 
 func (v *RequestVerifier) Checksum(r *http.Request) string {
-	var binData []byte
-	var err error
+	var (
+		data []byte
+		err  error
+	)
+
 	switch r.Method {
 	case "GET", "HEAD", "DELETE":
-		binData = []byte(r.URL.RawQuery)
+		data = []byte(r.URL.RawQuery)
 	case "POST", "PUT":
-		r.Body, binData, err = drainBody(r.Body)
+		r.Body, data, err = drainBody(r.Body)
 		if err != nil {
 			return "-"
 		}
@@ -43,7 +47,7 @@ func (v *RequestVerifier) Checksum(r *http.Request) string {
 		hash.Write([]byte(r.Header.Get(h)))
 	}
 
-	hash.Write(binData)
+	hash.Write(data)
 
 	return fmt.Sprintf("%x", hash.Sum(nil))
 }
@@ -58,11 +62,11 @@ func (v *RequestVerifier) VerifyRequest(r *http.Request) error {
 		dateStr := r.Header.Get(v.dateHeader)
 		date, err := time.Parse(time.RFC1123, dateStr)
 		if err != nil {
-			return errors.Join(err, ErrInvalidDate)
+			return errors.Join(err, ErrDateInvalidFormat)
 		}
 
 		if !date.Round(time.Minute).Equal(time.Now().Round(time.Minute)) {
-			return ErrInvalidDate
+			return ErrSignatureExpired
 		}
 	}
 
