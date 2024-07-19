@@ -2,6 +2,7 @@ package traefik_request_signature_verifier
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 )
@@ -52,7 +53,9 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 
 func (r *signatureVerifier) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if err := r.verifier.VerifyRequest(req); err != nil {
-		log.Printf("signature verification failed: %v", err)
+		if !errors.Is(err, ErrSignatureNotPresent) {
+			log.Printf("signature verification failed: %v", err)
+		}
 
 		if !r.cfg.DryRun {
 			http.Error(w, r.cfg.ResponseMessage, r.cfg.ResponseCode)
