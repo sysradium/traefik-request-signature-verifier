@@ -2,9 +2,11 @@ package traefik_request_signature_verifier
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"github.com/go-redis/redis/v8"
 	"io"
 	"net/http"
 	"strings"
@@ -16,22 +18,16 @@ var (
 	ErrDateInvalidFormat   = errors.New("invalid date format")
 	ErrInvalidSignature    = errors.New("invalid signature")
 	ErrSignatureNotPresent = errors.New("signature not present")
+	ErrNoValidKeysFound    = errors.New("no valid keys found")
 )
 
 type RequestVerifier struct {
-	secretKey  func() string
+	sigHeader  string
 	dateHeader string
 	headers    []string
 }
 
-func (v *RequestVerifier) Checksum(r *http.Request, key ...string) string {
-	// Используем переданный ключ, если он есть, иначе используем текущий ключ
-	var actualKey string
-	if len(key) > 0 {
-		actualKey = key[0]
-	} else {
-		actualKey = v.secretKey()
-	}
+func (v *RequestVerifier) Checksum(r *http.Request, key string) string {
 	var (
 		data []byte
 		err  error
@@ -47,20 +43,19 @@ func (v *RequestVerifier) Checksum(r *http.Request, key ...string) string {
 		}
 	}
 	hash := sha256.New()
-	hash.Write([]byte(actualKey))
+	hash.Write([]byte(key))
 
 	for _, h := range v.headers {
-		hash.Write([]byte(r.Header.Get(h)))
+		hash.Write([]byte(getNormalizedHeader(r, h)))
 	}
-
 	hash.Write(data)
 
 	return fmt.Sprintf("%x", hash.Sum(nil))
 }
 
-func (v *RequestVerifier) VerifyRequest(r *http.Request) error {
-	sig, found := getSignatureHeader(r)
-	if !found {
+func (v *RequestVerifier) VerifyRequest(r *http.Request, key string) error {
+	sig := r.Header.Get(v.sigHeader)
+	if sig == "" {
 		return ErrSignatureNotPresent
 	}
 
@@ -75,8 +70,7 @@ func (v *RequestVerifier) VerifyRequest(r *http.Request) error {
 			return ErrSignatureExpired
 		}
 	}
-
-	if strings.ToLower(sig) != v.Checksum(r) {
+	if strings.ToLower(sig) != v.Checksum(r, key) {
 		return ErrInvalidSignature
 	}
 
@@ -104,19 +98,13 @@ func drainBody(b io.ReadCloser) (res io.ReadCloser, data []byte, err error) {
 }
 
 // Helper function to validate the request signature with the given key
-func (v *RequestVerifier) ValidateSignature(r *http.Request, key ...string) bool {
+func (v *RequestVerifier) ValidateSignature(r *http.Request, key string) bool {
 	sig, found := getSignatureHeader(r)
 	if !found {
 		return false
 	}
-	computedSignature := v.Checksum(r, key...)
+	computedSignature := v.Checksum(r, key)
 	return strings.ToLower(sig) == computedSignature
-}
-
-func (v *RequestVerifier) UpdateKey(newKey string) {
-	v.secretKey = func() string {
-		return newKey
-	}
 }
 
 func getSignatureHeader(r *http.Request) (string, bool) {
@@ -130,4 +118,63 @@ func getSignatureHeader(r *http.Request) (string, bool) {
 	}
 
 	return "", false
+}
+
+type Static struct{ key string }
+
+func (s *Static) Current() string {
+	return s.key
+}
+
+func (s *Static) Rotate(ctx context.Context) (string, error) {
+	return s.key, nil
+}
+func (s *Static) Set(ctx context.Context, key string) error {
+	s.key = key
+	return nil
+}
+
+type Redis struct {
+	client     *redis.Client
+	currentKey string
+}
+
+func (r *Redis) Current() string {
+	return r.currentKey
+}
+
+func (r *Redis) Rotate(ctx context.Context) (string, error) {
+	newKey, err := r.client.Get(ctx, "query-signature-key").Result()
+	if err == nil && newKey != r.currentKey {
+		r.currentKey = newKey // update the current key to the new key
+		return newKey, nil
+	}
+	oldKey, err := r.client.Get(ctx, "query-signature-key-old").Result()
+	if err == nil && oldKey != r.currentKey {
+		return oldKey, nil
+	}
+	return "", ErrNoValidKeysFound
+}
+
+func (r *Redis) Set(ctx context.Context, key string) error {
+	if newKey, err := r.client.Get(ctx, "query-signature-key").Result(); err == nil {
+		r.currentKey = newKey
+		return nil
+	}
+	if oldKey, err := r.client.Get(ctx, "query-signature-key-old").Result(); err == nil {
+		r.currentKey = oldKey
+		return nil
+	}
+	return ErrNoValidKeysFound
+}
+
+func getNormalizedHeader(r *http.Request, header string) string {
+	switch strings.ToLower(header) {
+	case "authorization", "xauthorization", "x-authorization":
+		return r.Header.Get("x-authorization")
+	case "app-id":
+		return r.Header.Get("x-app-id")
+	default:
+		return r.Header.Get(header)
+	}
 }
