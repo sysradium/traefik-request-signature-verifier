@@ -99,25 +99,12 @@ func drainBody(b io.ReadCloser) (res io.ReadCloser, data []byte, err error) {
 
 // Helper function to validate the request signature with the given key
 func (v *RequestVerifier) ValidateSignature(r *http.Request, key string) bool {
-	sig, found := getSignatureHeader(r)
-	if !found {
+	sig := r.Header.Get(v.sigHeader)
+	if sig == "" {
 		return false
 	}
 	computedSignature := v.Checksum(r, key)
 	return strings.ToLower(sig) == computedSignature
-}
-
-func getSignatureHeader(r *http.Request) (string, bool) {
-	sig := r.Header.Get("X-Request-Signature")
-	if sig != "" {
-		return sig, true
-	}
-	sig = r.Header.Get("x-request-signature")
-	if sig != "" {
-		return sig, true
-	}
-
-	return "", false
 }
 
 type Static struct{ key string }
