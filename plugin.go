@@ -95,8 +95,10 @@ func (r *signatureVerifier) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		// Trying to retrieve and update the key
 		if err := r.RetrieveAndUpdateKey(req); err != nil {
 			log.Printf("Invalid signature: %v", err)
-			http.Error(w, "Invalid signature", http.StatusUnauthorized)
-			return
+			if !r.cfg.DryRun {
+				http.Error(w, r.cfg.ResponseMessage, r.cfg.ResponseCode)
+				return
+			}
 		}
 
 	}
