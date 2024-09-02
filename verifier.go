@@ -61,7 +61,7 @@ func (v *RequestVerifier) VerifyRequest(r *http.Request, key string) error {
 
 	if v.dateHeader != "" {
 		dateStr := r.Header.Get(v.dateHeader)
-		date, err := time.Parse(time.RFC1123, dateStr)
+		date, err := time.Parse(time.RFC1123Z, dateStr)
 		if err != nil {
 			return errors.Join(err, ErrDateInvalidFormat)
 		}
