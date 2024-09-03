@@ -119,13 +119,11 @@ func initSecretKey(keyStore *Redis) error {
 func (r *signatureVerifier) RetrieveAndUpdateKey(req *http.Request) error {
 	ctx := context.Background()
 	newKey, err := r.keyStore.Rotate(ctx)
-	if err == nil {
-		if r.verifier.ValidateSignature(req, newKey) {
-			return nil
-		}
-	} else {
+	if err != nil {
 		log.Printf("Error rotating to new key: %v", err)
 		return ErrNoValidKeysFound
+	} else if !r.verifier.ValidateSignature(req, newKey) {
+		return ErrInvalidSignature
 	}
-	return ErrInvalidSignature
+	return nil
 }
