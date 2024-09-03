@@ -161,10 +161,20 @@ func (r *Redis) Set(ctx context.Context, key string) error {
 
 func getNormalizedHeader(r *http.Request, header string) string {
 	switch strings.ToLower(header) {
-	case "authorization", "xauthorization", "x-authorization":
-		return r.Header.Get("x-authorization")
+	case "authorization":
+		for _, h := range []string{"authorization", "xauthorization", "x-authorization"} {
+			if val := r.Header.Get(h); val != "" {
+				return val
+			}
+		}
+		return ""
 	case "app-id":
-		return r.Header.Get("x-app-id")
+		for _, h := range []string{"APP-ID", "x-app-id"} {
+			if val := r.Header.Get(h); val != "" {
+				return val
+			}
+		}
+		return ""
 	default:
 		return r.Header.Get(header)
 	}
