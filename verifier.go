@@ -6,11 +6,12 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"github.com/go-redis/redis/v8"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/go-redis/redis/v8"
 )
 
 var (
@@ -61,7 +62,7 @@ func (v *RequestVerifier) VerifyRequest(r *http.Request, key string) error {
 
 	if v.dateHeader != "" {
 		dateStr := r.Header.Get(v.dateHeader)
-		date, err := time.Parse(time.RFC1123Z, dateStr)
+		date, err := time.Parse(time.RFC1123, dateStr)
 		if err != nil {
 			return errors.Join(err, ErrDateInvalidFormat)
 		}
@@ -116,6 +117,7 @@ func (s *Static) Current() string {
 func (s *Static) Rotate(ctx context.Context) (string, error) {
 	return s.key, nil
 }
+
 func (s *Static) Set(ctx context.Context, key string) error {
 	s.key = key
 	return nil
