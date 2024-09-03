@@ -1,4 +1,4 @@
-module github.com/andviro/traefik-request-signature-verifier
+module github.com/sysradium/traefik-request-signature-verifier
 
 go 1.22
 
