@@ -86,21 +86,22 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 }
 
 func (r *signatureVerifier) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	requestValid := true
 	// Trying to verify the request with the current key
-	if err := r.verifier.VerifyRequest(req, r.keyStore.Current()); err != nil {
-		if !errors.Is(err, ErrSignatureNotPresent) {
-			log.Printf("signature verification failed with current key: %v", err)
-		}
-
+	if err := r.verifier.VerifyRequest(req, r.keyStore.Current()); errors.Is(err, ErrInvalidSignature) {
+		log.Printf("signature verification failed with current key: %v", err)
 		// Trying to retrieve and update the key
 		if err := r.RetrieveAndUpdateKey(req); err != nil {
-			log.Printf("Invalid signature: %v", err)
-			if !r.cfg.DryRun {
-				http.Error(w, r.cfg.ResponseMessage, r.cfg.ResponseCode)
-				return
-			}
+			log.Printf("signature invalid after update: %v", err)
+			requestValid = false
 		}
-
+	} else if err != nil {
+		log.Printf("error validating request: %+v", err)
+		requestValid = false
+	}
+	if !requestValid && !r.cfg.DryRun {
+		http.Error(w, r.cfg.ResponseMessage, r.cfg.ResponseCode)
+		return
 	}
 	r.next.ServeHTTP(w, req)
 }

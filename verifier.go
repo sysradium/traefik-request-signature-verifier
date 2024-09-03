@@ -16,11 +16,16 @@ import (
 
 var (
 	ErrSignatureExpired    = errors.New("signature has expired")
-	ErrDateInvalidFormat   = errors.New("invalid date format")
 	ErrInvalidSignature    = errors.New("invalid signature")
 	ErrSignatureNotPresent = errors.New("signature not present")
 	ErrNoValidKeysFound    = errors.New("no valid keys found")
 )
+
+type InvalidDateFormatError string
+
+func (idfe InvalidDateFormatError) Error() string {
+	return fmt.Sprintf("invalid date format: %s", string(idfe))
+}
 
 type RequestVerifier struct {
 	sigHeader  string
@@ -59,14 +64,12 @@ func (v *RequestVerifier) VerifyRequest(r *http.Request, key string) error {
 	if sig == "" {
 		return ErrSignatureNotPresent
 	}
-
 	if v.dateHeader != "" {
 		dateStr := r.Header.Get(v.dateHeader)
 		date, err := time.Parse(time.RFC1123, dateStr)
 		if err != nil {
-			return errors.Join(err, ErrDateInvalidFormat)
+			return errors.Join(err, InvalidDateFormatError(fmt.Sprintf("error parsing %q: %+v", dateStr, err)))
 		}
-
 		if !date.Round(time.Minute).Equal(time.Now().Round(time.Minute)) {
 			return ErrSignatureExpired
 		}
@@ -74,7 +77,6 @@ func (v *RequestVerifier) VerifyRequest(r *http.Request, key string) error {
 	if strings.ToLower(sig) != v.Checksum(r, key) {
 		return ErrInvalidSignature
 	}
-
 	return nil
 }
 
