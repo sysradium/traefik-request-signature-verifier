@@ -2,41 +2,51 @@ package traefik_request_signature_verifier
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 
 	"github.com/go-redis/redis/v8"
-	"github.com/kelseyhightower/envconfig"
 )
 
 type Config struct {
-	ResponseMessage     string
-	SecretKey           string
-	SignatureHeader     string
-	DateHeader          string
-	AuthorizationHeader string
-	AppIDHeader         string
-	Headers             []string
-	ResponseCode        int
-	DryRun              bool
-	RedisURI            string `envconfig:"REDIS_URI" required:"true"`
+	ResponseMessage     string   `json:"responseMessage,omitempty"`
+	SecretKey           string   `json:"secretKey,omitempty"`
+	SignatureHeader     string   `json:"signatureHeader,omitempty"`
+	DateHeader          string   `json:"dateHeader,omitempty"`
+	AuthorizationHeader string   `json:"authorizationHeader,omitempty"`
+	AppIDHeader         string   `json:"appIDHeader,omitempty"`
+	Headers             []string `json:"headers,omitempty"`
+	ResponseCode        int      `json:"responseCode,omitempty"`
+	DryRun              bool     `json:"dryRun,omitempty"`
+	RedisURI            string   `json:"redisURI,omitempty"`
 }
 
 func CreateConfig() *Config {
-	config := &Config{
-		Headers:         []string{"Authorization", "APP-ID"},
-		ResponseCode:    http.StatusForbidden,
-		ResponseMessage: "{\"error\": \"invalid checksum\"}",
-		SecretKey:       "62df864b-dd00-43e3-ac0a-5760ae26d3f5",
-		DateHeader:      "X-Date",
-		SignatureHeader: "X-Request-Signature",
-	}
-	if err := envconfig.Process("", config); err != nil {
-		log.Fatalf("Failed to process env config: %v", err)
-	}
-
+	config := &Config{}
 	return config
+}
+
+func (c *Config) SetDefaults() {
+	if c.Headers == nil {
+		c.Headers = []string{"Authorization", "APP-ID"}
+	}
+	if c.ResponseCode == 0 {
+		c.ResponseCode = http.StatusForbidden
+	}
+	if c.ResponseMessage == "" {
+		c.ResponseMessage = "{\"error\": \"invalid checksum\"}"
+	}
+	if c.SecretKey == "" {
+		c.SecretKey = "62df864b-dd00-43e3-ac0a-5760ae26d3f5"
+	}
+	if c.DateHeader == "" {
+		c.DateHeader = "X-Date"
+	}
+	if c.SignatureHeader == "" {
+		c.SignatureHeader = "X-Request-Signature"
+	}
 }
 
 type KeyStore interface {
@@ -55,7 +65,9 @@ type signatureVerifier struct {
 
 func New(_ context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
 	var keyStore KeyStore
-
+	config.SetDefaults()
+	jd, _ := json.MarshalIndent(config, "", "\t")
+	log.Printf("received configuration: %s", jd)
 	if config.RedisURI != "" {
 		opts, err := redis.ParseURL(config.RedisURI)
 		if err != nil {
