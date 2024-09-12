@@ -4,14 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/go-redis/redis/v8"
 )
 
 var (
@@ -125,38 +124,62 @@ func (s *Static) Set(ctx context.Context, key string) error {
 	return nil
 }
 
-type Redis struct {
-	client     *redis.Client
+type LocalHTTP struct {
 	currentKey string
+	Client     *http.Client
+	URL        string
 }
 
-func (r *Redis) Current() string {
-	return r.currentKey
+func (l *LocalHTTP) Current() string {
+	return l.currentKey
 }
 
-func (r *Redis) Rotate(ctx context.Context) (string, error) {
-	newKey, err := r.client.Get(ctx, "query-signature-key").Result()
-	if err == nil && newKey != r.currentKey {
-		r.currentKey = newKey // update the current key to the new key
-		return newKey, nil
+func (l *LocalHTTP) client() *http.Client {
+	if l.Client != nil {
+		return l.Client
 	}
-	oldKey, err := r.client.Get(ctx, "query-signature-key-old").Result()
-	if err == nil && oldKey != r.currentKey {
-		return oldKey, nil
-	}
-	return "", ErrNoValidKeysFound
+	return http.DefaultClient
 }
 
-func (r *Redis) Set(ctx context.Context, key string) error {
-	if newKey, err := r.client.Get(ctx, "query-signature-key").Result(); err == nil {
-		r.currentKey = newKey
-		return nil
+type LocalHTTPKeyResponse struct {
+	Current string `json:"current"`
+	Old     string `json:"old"`
+}
+
+func (l *LocalHTTP) getRemoteKey(ctx context.Context) (string, string, error) {
+	resp, err := l.client().Get(l.URL)
+	if err != nil {
+		return "", "", fmt.Errorf("calling HTTP key store: %+v", err)
 	}
-	if oldKey, err := r.client.Get(ctx, "query-signature-key-old").Result(); err == nil {
-		r.currentKey = oldKey
-		return nil
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", fmt.Errorf("reading HTTP key store response: %+v", err)
 	}
-	return ErrNoValidKeysFound
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("HTTP key store returned status %d (%s)", resp.StatusCode, data)
+	}
+	var r LocalHTTPKeyResponse
+	if err := json.Unmarshal(data, &r); err != nil {
+		return "", "", fmt.Errorf("parsing HTTP key store response (%s): %+v", data, err)
+	}
+	return r.Current, r.Old, nil
+}
+
+func (l *LocalHTTP) Rotate(ctx context.Context) (string, error) {
+	newKey, _, err := l.getRemoteKey(ctx)
+	if err != nil {
+		return "", fmt.Errorf("rotating keys: %+v", err)
+	}
+	return newKey, nil
+}
+
+func (l *LocalHTTP) Set(ctx context.Context, key string) error {
+	newKey, _, err := l.getRemoteKey(ctx)
+	if err != nil {
+		return fmt.Errorf("setting keys: %+v", err)
+	}
+	l.currentKey = newKey
+	return nil
 }
 
 func getNormalizedHeader(r *http.Request, header string) string {
