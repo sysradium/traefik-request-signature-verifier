@@ -6,8 +6,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-
-	"github.com/go-redis/redis/v8"
 )
 
 type Config struct {
@@ -20,7 +18,7 @@ type Config struct {
 	Headers             []string `json:"headers,omitempty"`
 	ResponseCode        int      `json:"responseCode,omitempty"`
 	DryRun              bool     `json:"dryRun,omitempty"`
-	RedisURI            string   `json:"redisURI,omitempty"`
+	KeyStoreURL         string   `json:"keyStoreURL,omitempty"`
 }
 
 func CreateConfig() *Config {
@@ -68,18 +66,12 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 	config.SetDefaults()
 	jd, _ := json.MarshalIndent(config, "", "\t")
 	log.Printf("received configuration: %s", jd)
-	if config.RedisURI != "" {
-		opts, err := redis.ParseURL(config.RedisURI)
-		if err != nil {
-			return nil, err
+	if config.KeyStoreURL != "" {
+		ks := &LocalHTTP{URL: config.KeyStoreURL}
+		if err := initSecretKey(ks); err != nil {
+			log.Printf("Failed to initialize key store: %+v", err)
 		}
-		redisClient := redis.NewClient(opts)
-		redisKeyStore := &Redis{client: redisClient}
-
-		if err := initSecretKey(redisKeyStore); err != nil {
-			log.Printf("Failed to initialize Redis key store: %v", err)
-		}
-		keyStore = redisKeyStore
+		keyStore = ks
 	} else {
 		keyStore = &Static{key: config.SecretKey}
 	}
@@ -118,7 +110,7 @@ func (r *signatureVerifier) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	r.next.ServeHTTP(w, req)
 }
 
-func initSecretKey(keyStore *Redis) error {
+func initSecretKey(keyStore KeyStore) error {
 	ctx := context.Background()
 	if err := keyStore.Set(ctx, ""); err != nil {
 		if !errors.Is(err, ErrNoValidKeysFound) {
